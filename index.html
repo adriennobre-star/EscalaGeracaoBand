@@ -295,6 +295,48 @@ footer .foot-logo{opacity:.55;}
 .scroll-list{max-height:340px;overflow-y:auto;padding-right:6px;}
 .admin-footnote{margin-top:6px;}
 
+.rank-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
+.rank-row:last-child{border-bottom:none;}
+.rank-badge{
+  width:27px;height:27px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11.5px;font-weight:800;font-family:"Baloo 2",sans-serif;
+  background:var(--teal-tint);color:var(--teal-dark);
+}
+.rank-badge.r1{background:linear-gradient(155deg,#F2CE7E,#DE9F2E);color:#4A3106;}
+.rank-badge.r2{background:linear-gradient(155deg,#E3E9EC,#B7C2C7);color:#38424A;}
+.rank-badge.r3{background:linear-gradient(155deg,#E9CAA6,#C79868);color:#4A3319;}
+.rank-name{flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rank-track{flex:1.4;height:9px;border-radius:5px;background:var(--cream-deep);overflow:hidden;max-width:150px;}
+.rank-fill{display:block;height:100%;background:var(--teal);border-radius:5px;}
+.rank-fill.gold{background:var(--gold);}
+.rank-count{width:50px;flex-shrink:0;text-align:right;font-size:12px;font-weight:700;color:var(--ink-soft);}
+
+.formation-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;}
+.formation-chip{
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  background:var(--cream);border:1.5px solid var(--border);border-radius:var(--radius-md);
+  padding:13px 10px 11px;min-width:88px;flex:1 1 88px;
+}
+.formation-chip.typical{border-color:var(--teal);background:var(--teal-tint);}
+.formation-chip .fc-icon{
+  width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:var(--card);color:var(--ink-soft);flex-shrink:0;
+}
+.formation-chip .fc-icon svg{width:18px;height:18px;}
+.formation-chip.typical .fc-icon{background:var(--teal);color:#fff;}
+.formation-chip .fc-count{font-family:"Baloo 2",sans-serif;font-size:16.5px;font-weight:800;color:var(--ink);line-height:1;}
+.formation-chip.rare .fc-count{color:var(--ink-soft);}
+.formation-chip .fc-label{font-size:11px;font-weight:700;color:var(--ink-soft);text-align:center;line-height:1.25;}
+.formation-chip.typical .fc-label{color:var(--teal-dark);}
+.formation-chip .fc-pct{font-size:10px;font-weight:700;color:var(--ink-soft);}
+.formation-sentence{font-size:13px;color:var(--ink-soft);line-height:1.65;margin-top:14px;padding-top:12px;border-top:1px dashed var(--border);}
+.formation-sentence b{color:var(--ink);}
+@media (max-width:480px){
+  .formation-chip{min-width:76px;padding:11px 6px 9px;}
+  .rank-name{font-size:12px;}
+}
+
 [hidden]{display:none!important;}
 :focus-visible{outline:2px solid var(--teal);outline-offset:2px;}
 @media (prefers-reduced-motion:no-preference){
@@ -769,13 +811,52 @@ footer .foot-logo{opacity:.55;}
     }).join("") + '</div>';
   }
 
+  function rankListHtml(items, opts){
+    opts = opts || {};
+    if(!items.length){
+      return '<div class="admin-empty">Ainda não há dados suficientes.</div>';
+    }
+    var max = items.reduce(function(m, it){ return Math.max(m, it.count); }, 0) || 1;
+    return '<div class="bar-list">' + items.map(function(it, i){
+      var pct = Math.round((it.count / max) * 100);
+      var rankClass = i === 0 ? " r1" : i === 1 ? " r2" : i === 2 ? " r3" : "";
+      var badgeContent = i < 3 ? String(i + 1) : escapeHtml(initials(it.name));
+      return '<div class="rank-row">' +
+        '<span class="rank-badge' + rankClass + '">' + badgeContent + '</span>' +
+        '<span class="rank-name" title="' + escapeHtml(it.name) + '">' + escapeHtml(it.name) + '</span>' +
+        '<span class="rank-track"><span class="rank-fill' + (i === 0 ? " gold" : "") + '" style="width:' + pct + '%"></span></span>' +
+        '<span class="rank-count">' + it.count + (opts.suffix || '') + '</span>' +
+      '</div>';
+    }).join("") + '</div>';
+  }
+
+  function formationChipsHtml(porInstrumento, totalCultos){
+    if(!totalCultos){
+      return '<div class="admin-empty">Ainda não há dados suficientes.</div>';
+    }
+    var sorted = porInstrumento.slice().sort(function(a, b){ return b.pct - a.pct; });
+    var chips = sorted.map(function(r){
+      var typical = r.pct >= 50;
+      return '<div class="formation-chip ' + (typical ? "typical" : "rare") + '">' +
+        '<span class="fc-icon">' + ICONS[r.id] + '</span>' +
+        '<span class="fc-count">' + (typical ? "1×" : "—") + '</span>' +
+        '<span class="fc-label">' + escapeHtml(r.label) + '</span>' +
+        '<span class="fc-pct">' + r.pct + '% dos cultos</span>' +
+      '</div>';
+    }).join("");
+    var typicalRoles = sorted.filter(function(r){ return r.pct >= 50; });
+    var sentence = typicalRoles.length ?
+      'Em média, um culto do Geração Band conta com <b>' + typicalRoles.map(function(r){ return "1 " + r.label; }).join(", ") + '</b>. As demais funções aparecem com menos frequência (veja o percentual em cada cartão).' :
+      'Ainda não há cultos suficientes registrados para apontar uma formação típica — os números aparecem conforme as pessoas forem se escalando.';
+    return '<div class="formation-row">' + chips + '</div>' +
+      '<p class="formation-sentence">' + sentence + '</p>';
+  }
+
   function renderAdminBody(stats){
-    var pessoasTop = stats.porPessoa.slice(0, 10).map(function(p){ return {label: p.name, count: p.count}; });
-    var pessoasTodas = stats.porPessoa.map(function(p){ return {label: p.name, count: p.count}; });
-    var condutores = stats.porCondutor.map(function(p){ return {label: p.name, count: p.count}; });
-    var instrumentos = stats.porInstrumento.map(function(r){
-      return {label: r.label + (stats.totalCultos ? " (" + r.pct + "%)" : ""), count: r.count};
-    });
+    var pessoasTop = stats.porPessoa.slice(0, 10);
+    var pessoasTodas = stats.porPessoa;
+    var condutores = stats.porCondutor;
+    var qtdCondutores = stats.porCondutor.length;
 
     return '' +
       '<header class="topbar">' +
@@ -794,31 +875,32 @@ footer .foot-logo{opacity:.55;}
       '<main class="admin-main">' +
         '<div class="stat-grid">' +
           '<div class="stat-tile"><span class="stat-value">' + stats.totalCultos + '</span><span class="stat-label">Cultos já realizados (com escala)</span></div>' +
-          '<div class="stat-tile"><span class="stat-value">' + stats.formacaoMedia.toFixed(1) + '</span><span class="stat-label">Formação média por culto</span></div>' +
+          '<div class="stat-tile"><span class="stat-value">' + stats.formacaoMedia.toFixed(1) + '</span><span class="stat-label">Pessoas por culto, em média</span></div>' +
           '<div class="stat-tile"><span class="stat-value">' + stats.porPessoa.length + '</span><span class="stat-label">Pessoas diferentes que já serviram</span></div>' +
+          '<div class="stat-tile"><span class="stat-value">' + qtdCondutores + '</span><span class="stat-label">Condutores diferentes</span></div>' +
         '</div>' +
+
+        '<section class="chart-card">' +
+          '<h3>Formação média dos cultos</h3>' +
+          '<p class="chart-note">Não é uma contagem — é quem costuma estar no palco. Cartões destacados (' + escapeHtml("≥") + '50% dos cultos) mostram a formação típica; os demais aparecem com menos frequência.</p>' +
+          formationChipsHtml(stats.porInstrumento, stats.totalCultos) +
+        '</section>' +
+
+        '<section class="chart-card">' +
+          '<h3>Condutores (' + qtdCondutores + ' diferente' + (qtdCondutores === 1 ? "" : "s") + ')</h3>' +
+          '<p class="chart-note">Todo mundo que já conduziu, do que mais atuou ao que menos atuou — com a quantidade de cultos conduzidos por cada um.</p>' +
+          rankListHtml(condutores, {suffix: "×"}) +
+        '</section>' +
 
         '<section class="chart-card">' +
           '<h3>Pessoas que mais se inscreveram</h3>' +
           '<p class="chart-note">Top 10 por quantidade de vagas em que serviram.</p>' +
-          barListHtml(pessoasTop, {suffix: "×"}) +
+          rankListHtml(pessoasTop, {suffix: "×"}) +
         '</section>' +
 
         '<section class="chart-card">' +
-          '<h3>Condutores que mais servem</h3>' +
-          '<p class="chart-note">Quantidade de cultos conduzidos por pessoa.</p>' +
-          barListHtml(condutores, {suffix: "×"}) +
-        '</section>' +
-
-        '<section class="chart-card">' +
-          '<h3>Cultos por instrumento / formação</h3>' +
-          '<p class="chart-note">Em quantos cultos já realizados cada função esteve presente (e em quantos % do total).</p>' +
-          barListHtml(instrumentos, {suffix: " cultos"}) +
-        '</section>' +
-
-        '<section class="chart-card">' +
-          '<h3>Todas as pessoas que já se inscreveram</h3>' +
-          '<div class="scroll-list">' + barListHtml(pessoasTodas, {suffix: "×"}) + '</div>' +
+          '<h3>Todas as pessoas que já se inscreveram (' + pessoasTodas.length + ')</h3>' +
+          '<div class="scroll-list">' + rankListHtml(pessoasTodas, {suffix: "×"}) + '</div>' +
         '</section>' +
       '</main>' +
       '<footer>Calculado a partir de ' + ((adminLog && adminLog.length) || 0) + ' registros de histórico.<br><span class="admin-footnote">Painel privado — não compartilhe o código de acesso.</span></footer>' +
