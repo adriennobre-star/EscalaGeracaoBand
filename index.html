@@ -412,6 +412,8 @@ footer .foot-logo{opacity:.55;}
   var pollTimer = null;
   var adminMode = false;
   var adminLog = null;
+  var adminPin = null;
+  var adminPollTimer = null;
 
   function escapeHtml(s){
     return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -727,8 +729,10 @@ footer .foot-logo{opacity:.55;}
       if(data.ok){
         adminLog = data.log || [];
         adminMode = true;
+        adminPin = pin;
         closeModal();
         renderAdmin();
+        startAdminPolling();
       } else {
         showToast("Código incorreto.");
         if(btn){ btn.disabled = false; btn.textContent = "Entrar"; }
@@ -742,7 +746,32 @@ footer .foot-logo{opacity:.55;}
   function exitAdmin(){
     adminMode = false;
     adminLog = null;
+    adminPin = null;
+    stopAdminPolling();
     render(currentState);
+  }
+
+  // Enquanto o painel de admin está aberto, verifica de tempos em tempos
+  // se alguém preencheu/trocou/removeu uma vaga no site e atualiza os
+  // gráficos sozinho, sem precisar sair e entrar de novo.
+  function startAdminPolling(){
+    stopAdminPolling();
+    adminPollTimer = setInterval(function(){
+      if(document.hidden || isModalOpen() || !adminMode || !adminPin) return;
+      fetchAdminLog(adminPin).then(function(data){
+        if(!data.ok) return;
+        var newLog = data.log || [];
+        var changed = !adminLog || newLog.length !== adminLog.length ||
+          JSON.stringify(newLog) !== JSON.stringify(adminLog);
+        if(changed){
+          adminLog = newLog;
+          renderAdmin();
+        }
+      }).catch(function(){});
+    }, 15000);
+  }
+  function stopAdminPolling(){
+    if(adminPollTimer){ clearInterval(adminPollTimer); adminPollTimer = null; }
   }
 
   function computeAdminStats(log){
@@ -786,12 +815,20 @@ footer .foot-logo{opacity:.55;}
         .sort(function(a, b){ return b.count - a.count || a.name.localeCompare(b.name, "pt-BR"); });
     }
 
+    var porRemocao = {};
+    (log || []).forEach(function(entry){
+      if(entry.type === "remove" && entry.actor){
+        porRemocao[entry.actor] = (porRemocao[entry.actor] || 0) + 1;
+      }
+    });
+
     return {
       totalCultos: totalCultos,
       formacaoMedia: formacaoMedia,
       porPessoa: toRanked(porPessoa),
       porCondutor: toRanked(porCondutor),
-      porInstrumento: porInstrumento
+      porInstrumento: porInstrumento,
+      porRemocao: toRanked(porRemocao)
     };
   }
 
@@ -902,6 +939,12 @@ footer .foot-logo{opacity:.55;}
           '<h3>Todas as pessoas que já se inscreveram (' + pessoasTodas.length + ')</h3>' +
           '<div class="scroll-list">' + rankListHtml(pessoasTodas, {suffix: "×"}) + '</div>' +
         '</section>' +
+
+        '<section class="chart-card">' +
+          '<h3>Quem mais tirou o nome da escala</h3>' +
+          '<p class="chart-note">Toda vez que alguém toca em "Deixar vaga livre" e informa o nome, contamos aqui. Remoções feitas antes dessa função existir não entram na conta.</p>' +
+          rankListHtml(stats.porRemocao, {suffix: "×"}) +
+        '</section>' +
       '</main>' +
       '<footer>Calculado a partir de ' + ((adminLog && adminLog.length) || 0) + ' registros de histórico.<br><span class="admin-footnote">Painel privado — não compartilhe o código de acesso.</span></footer>' +
       '<div class="modal-overlay" id="modalOverlay" hidden>' +
@@ -922,13 +965,15 @@ footer .foot-logo{opacity:.55;}
     });
   }
 
-  function saveState(newState){
+  function saveState(newState, actor){
     pruneOldAssignments(newState);
     var expectedUpdatedAt = currentState ? currentState.updatedAt : null;
+    var body = {state: newState, expectedUpdatedAt: expectedUpdatedAt};
+    if(actor) body.actor = actor;
     return fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: {"Content-Type": "text/plain;charset=utf-8"},
-      body: JSON.stringify({state: newState, expectedUpdatedAt: expectedUpdatedAt})
+      body: JSON.stringify(body)
     }).then(function(res){
       if(!res.ok) throw new Error("HTTP " + res.status);
       return res.json();
@@ -969,9 +1014,44 @@ footer .foot-logo{opacity:.55;}
 
   function handleRemoveAssign(){
     if(!pendingSlot) return;
+    var savedMe = "";
+    try{ savedMe = localStorage.getItem("gbrp_meuNome") || ""; }catch(e){}
+    if(!savedMe){
+      openRemoverPromptModal();
+      return;
+    }
+    performRemoveAssign(savedMe);
+  }
+
+  function openRemoverPromptModal(){
+    var box = document.getElementById("modalBox");
+    box.innerHTML =
+      '<h3>Quem está removendo?</h3>' +
+      '<div class="modal-sub">Só para a gente saber quem tirou o nome dessa vaga.</div>' +
+      '<label for="modalRemoverInput">Seu nome</label>' +
+      '<input type="text" id="modalRemoverInput" placeholder="Digite seu nome" autocomplete="off">' +
+      '<div class="modal-actions">' +
+        '<button type="button" class="btn btn-ghost" id="modalCancelBtn">Cancelar</button>' +
+        '<button type="button" class="btn btn-primary" id="modalRemoverConfirmBtn">Confirmar</button>' +
+      '</div>';
+    document.getElementById("modalOverlay").hidden = false;
+    var input = document.getElementById("modalRemoverInput");
+    setTimeout(function(){ input.focus(); }, 30);
+  }
+
+  function handleRemoverConfirm(){
+    var input = document.getElementById("modalRemoverInput");
+    var name = (input.value || "").trim();
+    if(!name){ input.focus(); return; }
+    try{ localStorage.setItem("gbrp_meuNome", name); }catch(e){}
+    performRemoveAssign(name);
+  }
+
+  function performRemoveAssign(removerName){
+    if(!pendingSlot) return;
     var newState = cloneState(currentState);
     setAssignment(newState, pendingSlot.weekId, pendingSlot.periodId, pendingSlot.roleId, "");
-    saveState(newState).then(function(ok){ if(ok) closeModal(); });
+    saveState(newState, removerName).then(function(ok){ if(ok) closeModal(); });
   }
 
   function handleSaveMe(){
@@ -1052,6 +1132,7 @@ footer .foot-logo{opacity:.55;}
       if(t.id === "modalCancelBtn"){ closeModal(); return; }
       if(t.id === "modalConfirmBtn"){ handleConfirmAssign(); return; }
       if(t.id === "modalRemoveBtn"){ handleRemoveAssign(); return; }
+      if(t.id === "modalRemoverConfirmBtn"){ handleRemoverConfirm(); return; }
       if(t.id === "modalSaveMeBtn"){ handleSaveMe(); return; }
       if(t.id === "modalOverlay"){ closeModal(); return; }
 
@@ -1072,13 +1153,21 @@ footer .foot-logo{opacity:.55;}
           handleAddRoster();
         } else if(document.activeElement && document.activeElement.id === "modalAdminPinInput"){
           handleAdminPinSubmit();
+        } else if(document.activeElement && document.activeElement.id === "modalRemoverInput"){
+          handleRemoverConfirm();
         }
       }
       if(e.key === "Escape"){ closeModal(); }
     });
 
     document.addEventListener("visibilitychange", function(){
-      if(document.hidden){ stopPolling(); } else { startPolling(); }
+      if(document.hidden){
+        stopPolling();
+        stopAdminPolling();
+      } else {
+        startPolling();
+        if(adminMode) startAdminPolling();
+      }
     });
   }
 
