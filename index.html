@@ -160,12 +160,48 @@ button{font-family:inherit;}
 .periods{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;
 }
-.period{background:var(--cream);border:1px solid var(--border);border-radius:var(--radius-md);padding:13px;}
+.period{background:var(--cream);border:1px solid var(--border);border-radius:var(--radius-md);padding:13px;perspective:1000px;}
+.period-flip-inner{transition:transform .16s ease-in;}
+.period-flip-inner.flip-mid{transform:rotateY(90deg);}
 .period-title{
   font-size:13px;font-weight:800;color:var(--teal-dark);margin-bottom:10px;
   display:flex;align-items:baseline;gap:6px;
 }
 .period-title .time{font-weight:700;color:var(--ink-soft);font-size:12px;}
+.period-title.back{color:var(--gold-dark);}
+.repertoire-toggle{
+  margin-left:auto;width:26px;height:26px;border-radius:50%;border:none;flex-shrink:0;
+  background:transparent;color:var(--ink-soft);cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.repertoire-toggle:hover{background:var(--teal-tint);color:var(--teal-dark);}
+.repertoire-toggle svg{width:15px;height:15px;display:block;}
+.song-list{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-direction:column;gap:6px;}
+.song-row{display:flex;align-items:center;gap:8px;}
+.song-icon{
+  width:22px;height:22px;flex-shrink:0;border-radius:7px;
+  background:var(--gold-tint);color:var(--gold-dark);
+  display:flex;align-items:center;justify-content:center;
+}
+.song-icon svg{width:12px;height:12px;}
+.song-name{
+  flex:1;text-align:left;background:transparent;border:none;padding:5px 6px;
+  font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;border-radius:8px;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.song-name:hover{background:var(--cream-deep);}
+.song-remove{
+  width:22px;height:22px;flex-shrink:0;border:none;background:transparent;
+  color:var(--ink-soft);border-radius:50%;cursor:pointer;font-size:15px;line-height:1;
+}
+.song-remove:hover{background:var(--danger);color:#fff;}
+.song-empty{font-size:12px;color:var(--ink-soft);padding:4px 0 8px;}
+.song-add{display:flex;gap:6px;}
+.song-add-input{
+  flex:1;min-width:0;border:1.5px solid var(--border);border-radius:999px;
+  padding:7px 12px;font-size:12.5px;background:var(--card);color:var(--ink);
+}
+.btn-sm{padding:7px 12px;font-size:12px;}
 .role-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px;}
 .role-row{display:flex;align-items:center;gap:9px;}
 .role-icon{
@@ -415,11 +451,15 @@ footer .foot-logo{opacity:.55;}
   };
   var THEME_LABELS = {system:"Tema automático", light:"Modo claro", dark:"Modo escuro"};
   var WA_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20.2l1.3-4A8.1 8.1 0 1 1 8.6 19l-4.6 1.2Z"/><path d="M8.6 11c.2 2.1 2 3.9 4.1 4.1" stroke-width="1.6"/></svg>';
+  var MUSIC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>';
+  var BACK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>';
   var WA_GREETING = "Oi Adrien! Vim pelo app da escala do Geração Band e queria falar com você.";
   var ADMIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><rect x="7" y="11" width="3" height="8" rx=".6"/><rect x="12.5" y="7" width="3" height="12" rx=".6"/><rect x="18" y="14" width="3" height="5" rx=".6"/></svg>';
 
   var currentState = null;
   var pendingSlot = null; // {weekId, periodId, roleId, currentName}
+  var pendingSong = null; // {weekId, idx}
+  var flippedPeriods = {}; // {weekId|periodId: true} — cards currently showing the repertoire face
   var pollTimer = null;
   var adminMode = false;
   var adminLog = null;
@@ -469,6 +509,9 @@ footer .foot-logo{opacity:.55;}
     Object.keys(s.assignments || {}).forEach(function(weekId){
       if(weekId < cutoffISO){ delete s.assignments[weekId]; }
     });
+    Object.keys(s.repertoire || {}).forEach(function(weekId){
+      if(weekId < cutoffISO){ delete s.repertoire[weekId]; }
+    });
   }
   function weekTitle(iso){
     var d = parseISODate(iso);
@@ -495,6 +538,13 @@ footer .foot-logo{opacity:.55;}
       s.roster.sort(function(a,b){ return a.localeCompare(b, "pt-BR"); });
     }
     return s;
+  }
+  function getRepertoire(s, weekId){
+    return (s.repertoire && s.repertoire[weekId]) || [];
+  }
+  function setRepertoire(s, weekId, songs){
+    if(!s.repertoire) s.repertoire = {};
+    s.repertoire[weekId] = songs;
   }
   function countFilled(s, weekId){
     var total = PERIODS.length * ROLES.length, filled = 0;
@@ -526,11 +576,45 @@ footer .foot-logo{opacity:.55;}
     '</li>';
   }
 
-  function periodBlockHtml(weekId, period){
+  function repertoireListHtml(weekId){
+    var songs = getRepertoire(currentState, weekId);
+    var rows = songs.map(function(song, idx){
+      return '<li class="song-row">' +
+        '<span class="song-icon">' + MUSIC_ICON + '</span>' +
+        '<button type="button" class="song-name" data-action="edit-song" data-week="' + weekId + '" data-idx="' + idx + '">' + escapeHtml(song) + '</button>' +
+        '<button type="button" class="song-remove" data-action="remove-song" data-week="' + weekId + '" data-idx="' + idx + '" aria-label="Remover música">×</button>' +
+      '</li>';
+    }).join("");
+    return '<ul class="song-list">' + (rows || '<li class="song-empty">Repertório ainda não definido para este domingo.</li>') + '</ul>' +
+      '<div class="song-add">' +
+        '<input type="text" class="song-add-input" data-week="' + weekId + '" placeholder="Adicionar música">' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="add-song" data-week="' + weekId + '">Adicionar</button>' +
+      '</div>';
+  }
+
+  function periodFrontInnerHtml(weekId, period){
     var rows = ROLES.map(function(r){ return roleRowHtml(weekId, period.id, r); }).join("");
-    return '<div class="period">' +
-      '<div class="period-title">' + period.label + ' <span class="time">· ' + period.time + '</span></div>' +
-      '<ul class="role-list">' + rows + '</ul>' +
+    var key = weekId + "|" + period.id;
+    return '<div class="period-title">' + period.label + ' <span class="time">· ' + period.time + '</span>' +
+        '<button type="button" class="repertoire-toggle" data-action="flip-front" data-period-key="' + key + '" title="Ver repertório" aria-label="Ver repertório deste culto">' + MUSIC_ICON + '</button>' +
+      '</div>' +
+      '<ul class="role-list">' + rows + '</ul>';
+  }
+
+  function periodBackInnerHtml(weekId, period){
+    var key = weekId + "|" + period.id;
+    return '<div class="period-title back">' +
+        '<button type="button" class="repertoire-toggle" data-action="flip-back" data-period-key="' + key + '" title="Voltar para a escala" aria-label="Voltar para a escala">' + BACK_ICON + '</button>' +
+        '<span>Repertório · ' + period.label + ' ' + period.time + '</span>' +
+      '</div>' +
+      repertoireListHtml(weekId);
+  }
+
+  function periodBlockHtml(weekId, period){
+    var key = weekId + "|" + period.id;
+    var inner = flippedPeriods[key] ? periodBackInnerHtml(weekId, period) : periodFrontInnerHtml(weekId, period);
+    return '<div class="period" data-period-key="' + key + '">' +
+      '<div class="period-flip-inner">' + inner + '</div>' +
     '</div>';
   }
 
@@ -574,6 +658,7 @@ footer .foot-logo{opacity:.55;}
   }
 
   function renderBody(s){
+    if(!s.repertoire) s.repertoire = {};
     currentState = s;
     var weeksHtml = getVisibleWeekIds().map(weekCardHtml).join("");
     return '' +
@@ -645,6 +730,80 @@ footer .foot-logo{opacity:.55;}
     var overlay = document.getElementById("modalOverlay");
     if(overlay){ overlay.hidden = true; }
     pendingSlot = null;
+    pendingSong = null;
+  }
+
+  function flipPeriod(key, toBack){
+    var wrap = document.querySelector('.period[data-period-key="' + key + '"]');
+    var inner = wrap && wrap.querySelector(".period-flip-inner");
+    if(!inner) return;
+    var parts = key.split("|");
+    var weekId = parts[0], periodId = parts[1];
+    var period = PERIODS.filter(function(p){ return p.id === periodId; })[0];
+    if(!period) return;
+    inner.classList.add("flip-mid");
+    setTimeout(function(){
+      flippedPeriods[key] = !!toBack;
+      inner.innerHTML = toBack ? periodBackInnerHtml(weekId, period) : periodFrontInnerHtml(weekId, period);
+      inner.classList.remove("flip-mid");
+    }, 160);
+  }
+
+  function handleAddSong(weekId, inputEl){
+    var name = (inputEl.value || "").trim();
+    if(!name) return;
+    var newState = cloneState(currentState);
+    var songs = getRepertoire(newState, weekId).slice();
+    songs.push(name);
+    setRepertoire(newState, weekId, songs);
+    inputEl.value = "";
+    saveState(newState);
+  }
+
+  function handleRemoveSong(weekId, idx){
+    var newState = cloneState(currentState);
+    var songs = getRepertoire(newState, weekId).slice();
+    songs.splice(idx, 1);
+    setRepertoire(newState, weekId, songs);
+    saveState(newState);
+  }
+
+  function openEditSongModal(weekId, idx){
+    var songs = getRepertoire(currentState, weekId);
+    var current = songs[idx] || "";
+    pendingSong = {weekId: weekId, idx: idx};
+    var box = document.getElementById("modalBox");
+    box.innerHTML =
+      '<h3>Editar música</h3>' +
+      '<div class="modal-sub">' + weekTitle(weekId) + '</div>' +
+      '<label for="modalNameInput">Nome da música</label>' +
+      '<input type="text" id="modalNameInput" placeholder="Nome da música" value="' + escapeHtml(current) + '" autocomplete="off">' +
+      '<div class="modal-actions">' +
+        '<button type="button" class="btn btn-danger" id="modalRemoveSongBtn">Remover</button>' +
+        '<button type="button" class="btn btn-ghost" id="modalCancelBtn">Cancelar</button>' +
+        '<button type="button" class="btn btn-primary" id="modalConfirmSongBtn">Salvar</button>' +
+      '</div>';
+    document.getElementById("modalOverlay").hidden = false;
+    var input = document.getElementById("modalNameInput");
+    setTimeout(function(){ input.focus(); input.select(); }, 30);
+  }
+
+  function handleConfirmSong(){
+    if(!pendingSong) return;
+    var input = document.getElementById("modalNameInput");
+    var name = (input.value || "").trim();
+    if(!name){ input.focus(); return; }
+    var newState = cloneState(currentState);
+    var songs = getRepertoire(newState, pendingSong.weekId).slice();
+    songs[pendingSong.idx] = name;
+    setRepertoire(newState, pendingSong.weekId, songs);
+    saveState(newState).then(function(ok){ if(ok) closeModal(); });
+  }
+
+  function handleRemoveSongModal(){
+    if(!pendingSong) return;
+    handleRemoveSong(pendingSong.weekId, pendingSong.idx);
+    closeModal();
   }
 
   function isModalOpen(){
@@ -1303,6 +1462,16 @@ footer .foot-logo{opacity:.55;}
           handleRemoveRoster(actionEl.getAttribute("data-name"));
         } else if(action === "add-roster"){
           handleAddRoster();
+        } else if(action === "flip-front" || action === "flip-back"){
+          flipPeriod(actionEl.getAttribute("data-period-key"), action === "flip-front");
+        } else if(action === "remove-song"){
+          handleRemoveSong(actionEl.getAttribute("data-week"), parseInt(actionEl.getAttribute("data-idx"), 10));
+        } else if(action === "edit-song"){
+          openEditSongModal(actionEl.getAttribute("data-week"), parseInt(actionEl.getAttribute("data-idx"), 10));
+        } else if(action === "add-song"){
+          var addWrap = actionEl.closest(".song-add");
+          var addInput = addWrap ? addWrap.querySelector(".song-add-input") : null;
+          if(addInput) handleAddSong(actionEl.getAttribute("data-week"), addInput);
         }
         return;
       }
@@ -1312,6 +1481,8 @@ footer .foot-logo{opacity:.55;}
       if(t.id === "modalRemoveBtn"){ handleRemoveAssign(); return; }
       if(t.id === "modalRemoverConfirmBtn"){ handleRemoverConfirm(); return; }
       if(t.id === "modalSaveMeBtn"){ handleSaveMe(); return; }
+      if(t.id === "modalConfirmSongBtn"){ handleConfirmSong(); return; }
+      if(t.id === "modalRemoveSongBtn"){ handleRemoveSongModal(); return; }
       if(t.id === "modalOverlay"){ closeModal(); return; }
 
       var quickPick = t.closest && t.closest(".quick-pick");
@@ -1326,6 +1497,7 @@ footer .foot-logo{opacity:.55;}
       if(e.key === "Enter"){
         if(document.activeElement && document.activeElement.id === "modalNameInput"){
           if(document.getElementById("modalConfirmBtn")) handleConfirmAssign();
+          else if(document.getElementById("modalConfirmSongBtn")) handleConfirmSong();
           else if(document.getElementById("modalSaveMeBtn")) handleSaveMe();
         } else if(document.activeElement && document.activeElement.id === "rosterAddInput"){
           handleAddRoster();
@@ -1333,6 +1505,10 @@ footer .foot-logo{opacity:.55;}
           handleAdminPinSubmit();
         } else if(document.activeElement && document.activeElement.id === "modalRemoverInput"){
           handleRemoverConfirm();
+        } else if(document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("song-add-input")){
+          var addWrap2 = document.activeElement.closest(".song-add");
+          var addBtn2 = addWrap2 && addWrap2.querySelector('[data-action="add-song"]');
+          if(addBtn2) handleAddSong(addBtn2.getAttribute("data-week"), document.activeElement);
         }
       }
       if(e.key === "Escape"){ closeModal(); }
